@@ -1,784 +1,309 @@
+<!-- delta_cvd v1.13 -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <title>Orderflow — Absorption Signals</title>
-  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
-  <style>
+<meta charset="UTF-8">
+<title>crypto-orderflow — v1.13</title>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
     html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      background: #0b0b0b;
-      color: #e0e0e0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      user-select: none;
-      overflow: hidden;
+        margin:0; padding:0;
+        background:#050505;
+        height:100%;
+        color:#ddd;
+        font-family:system-ui;
+        overflow:hidden;
     }
-
     #app {
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      width: 100vw;
+        display:flex;
+        flex-direction:column;
+        height:100vh;
     }
-
-    /* Верхняя панель */
     #controls {
-      flex: 0 0 auto;
-      padding: 6px 10px;
-      background: #111;
-      border-bottom: 1px solid #222;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      white-space: nowrap;
+        flex:0 0 auto;
+        padding:6px 10px;
+        background:#080808;
+        border-bottom:1px solid #151515;
+        display:flex;
+        gap:10px;
+        font-size:13px;
     }
-
-    #controls label {
-      display: flex;
-      align-items: center;
-      gap: 4px;
+    #controls select, #controls button {
+        background:#000;
+        color:#ddd;
+        border:1px solid #333;
+        border-radius:4px;
+        padding:3px 6px;
+        font-size:12px;
     }
-
-    #controls select {
-      background: #000;
-      color: #ddd;
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 2px 4px;
-      font-size: 12px;
+    #controls button {
+        background:#2e7d32;
+        cursor:pointer;
     }
-
-    #controls input[type="checkbox"] {
-      transform: scale(1.1);
-      cursor: pointer;
+    #controls button:hover {
+        background:#3fa546;
     }
+    #chartContainer { position:relative; flex:1; }
+    #chart { width:100%; height:100%; }
 
-    /* Основной контейнер графика */
-    #chartContainer {
-      position: relative;
-      flex: 1 1 auto;
-    }
-
-    #chart {
-      width: 100%;
-      height: 100%;
-    }
-
-    /* Текст символа и ТФ сверху слева */
     #pairLabel {
-      position: absolute;
-      top: 8px;
-      left: 12px;
-      padding: 4px 8px;
-      background: rgba(0,0,0,0.3);
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      z-index: 10;
-      pointer-events: none;
+        position:absolute; top:8px; left:10px;
+        background:rgba(0,0,0,0.4);
+        padding:4px 8px;
+        border-radius:6px;
+        font-size:13px;
+        z-index:20;
     }
-
-    /* Поднятый таймер под логотип ТВ */
-    #candleTimer {
-      position: absolute;
-      top: 28px;     /* поднято выше */
-      left: 12px;    /* слева */
-      padding: 3px 6px;
-      background: rgba(0,0,0,0.45);
-      border-radius: 6px;
-      font-size: 11px;
-      pointer-events: none;
-      z-index: 10;
-    }
-
-    /* Информация слева снизу */
-    #infoBar {
-      position: absolute;
-      bottom: 20px;
-      left: 12px;
-      padding: 4px 6px;
-      background: rgba(0,0,0,0.35);
-      border-radius: 6px;
-      font-size: 11px;
-      pointer-events: none;
-      z-index: 10;
-      display: flex;
-      gap: 8px;
-    }
-
-    /* Легенда сигналов — смещаем ЛЕВЕЕ, чтобы не мешала */
     #legend {
-      position: absolute;
-      top: 8px;
-      right: 120px;  /* раньше справа, теперь сдвинуто левее */
-      padding: 4px 8px;
-      background: rgba(0,0,0,0.35);
-      border-radius: 6px;
-      font-size: 11px;
-      pointer-events: none;
-      z-index: 10;
+        position:absolute; top:8px; right:10px;
+        background:rgba(0,0,0,0.4);
+        padding:4px 8px;
+        border-radius:6px;
+        font-size:11px;
+        z-index:20;
     }
-
-    #legend span.dot {
-      display: inline-block;
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      margin-right: 3px;
+    #legend .dot {
+        width:7px; height:7px;
+        display:inline-block;
+        border-radius:50%;
+        margin-right:4px;
     }
-  </style>
+    #candleTimer {
+        position:absolute; right:12px; top:40px;
+        background:rgba(0,0,0,0.6);
+        padding:3px 6px;
+        border-radius:6px;
+        font-size:11px;
+        z-index:20;
+    }
+</style>
 </head>
 
 <body>
 <div id="app">
 
-  <!-- Верхняя панель -->
-  <div id="controls">
+    <div id="controls">
+        <label>Монета:
+            <select id="symbolSel">
+                <option value="btcusdt">BTCUSDT</option>
+                <option value="ethusdt">ETHUSDT</option>
+                <option value="bnbusdt">BNBUSDT</option>
+                <option value="suiusdt">SUIUSDT</option>
+                <option value="adausdt">ADAUSDT</option>
+                <option value="filusdt">FILUSDT</option>
+                <option value="injusdt">INJUSDT</option>
+            </select>
+        </label>
 
-    <label>Монета:
-      <select id="symbolSel">
-        <option value="btcusdt">BTCUSDT</option>
-        <option value="ethusdt">ETHUSDT</option>
-        <option value="bnbusdt">BNBUSDT</option>
-        <option value="solusdt">SOLUSDT</option>
+        <label>TF:
+            <select id="tfSel">
+                <option value="1m" selected>1m</option>
+                <option value="5m">5m</option>
+                <option value="15m">15m</option>
+                <option value="1h">1h</option>
+            </select>
+        </label>
 
-        <option value="zigusdt">ZIGUSDT</option>
-        <option value="zecusdt">ZECUSDT</option>
-        <option value="zenusdt">ZENUSDT</option>
-        <option value="xrpusdt">XRPUSDT</option>
-        <option value="mntusdt">MNTUSDT</option>
-        <option value="apexusdt">APEXUSDT</option>
-        <option value="tonusdt">TONUSDT</option>
-        <option value="tacusdt">TACUSDT</option>
-        <option value="suiusdt">SUIUSDT</option>
-        <option value="adausdt">ADAUSDT</option>
-        <option value="filusdt">FILUSDT</option>
-        <option value="arcusdt">ARCUSDT</option>
-        <option value="glmusdt">GLMUSDT</option>
-        <option value="wlfiusdt">WLFIUSDT</option>
-        <option value="pnutusdt">PNUTUSDT</option>
-        <option value="dogeusdt">DOGEUSDT</option>
-        <option value="injusdt">INJUSDT</option>
-        <option value="ethfiusdt">ETHFIUSDT</option>
-        <option value="ltcusdt">LTCUSDT</option>
-      </select>
-    </label>
-
-    <label>TF:
-      <select id="tfSel">
-        <option value="5s">5s</option>
-        <option value="15s">15s</option>
-        <option value="30s">30s</option>
-        <option value="1m" selected>1m</option>
-        <option value="5m">5m</option>
-        <option value="15m">15m</option>
-        <option value="30m">30m</option>
-        <option value="1h">1h</option>
-        <option value="4h">4h</option>
-        <option value="1d">1d</option>
-      </select>
-    </label>
-
-    <!-- Галочки сигналов (вариант 2 — без текста) -->
-    <label><input type="checkbox" id="fltSTR" checked> STR</label>
-    <label><input type="checkbox" id="fltMED" checked> MED</label>
-    <label><input type="checkbox" id="fltWK" checked> WK</label>
-    <label><input type="checkbox" id="fltSPK" checked> SPK</label>
-  </div>
-
-  <div id="chartContainer">
-    <div id="pairLabel">BTCUSDT — 1m</div>
-
-    <div id="legend">
-      <div><span class="dot" style="background:#00e676;"></span>STR</div>
-      <div><span class="dot" style="background:#ffd54f;"></span>MED/WK</div>
-      <div><span class="dot" style="background:#40a0ff;"></span>SPK</div>
+        <button id="reloadBtn">Обновить</button>
     </div>
 
-    <div id="candleTimer">--:--</div>
+    <div id="chartContainer">
+        <div id="pairLabel">BTCUSDT — 1m — v1.13</div>
 
-    <div id="infoBar">
-      <span id="infoTime">—</span>
-      <span id="infoDelta">Δ: —</span>
-      <span id="infoCvd">CVD: —</span>
+        <div id="legend">
+            <div><span class="dot" style="background:#00e676"></span>B — strong BUY</div>
+            <div><span class="dot" style="background:#ff5252"></span>S — strong SELL</div>
+            <div><span class="dot" style="background:#ffd54f"></span>• — weak absorption</div>
+        </div>
+
+        <div id="candleTimer">--:--</div>
+        <div id="chart"></div>
     </div>
 
-    <div id="chart"></div>
-  </div>
+</div>
+
 <script>
-  const API = "http://217.154.190.220:8088";
+// ------------------------
+// CONFIG
+// ------------------------
+const API = "http://217.154.190.220:8088";
 
-  const symbolSel = document.getElementById("symbolSel");
-  const tfSel     = document.getElementById("tfSel");
+const TF_MAP = {
+    "1m": { interval:"1m", sec:60 },
+    "5m": { interval:"5m", sec:300 },
+    "15m": { interval:"15m", sec:900 },
+    "1h": { interval:"1h", sec:3600 }
+};
 
-  const fltSTR = document.getElementById("fltSTR");
-  const fltMED = document.getElementById("fltMED");
-  const fltWK  = document.getElementById("fltWK");
-  const fltSPK = document.getElementById("fltSPK");
+let chart, candleSeries;
+let candles = [];
+let flows = [];
+let flowsAgg = [];
 
-  const pairLabel = document.getElementById("pairLabel");
-  const infoTime  = document.getElementById("infoTime");
-  const infoDelta = document.getElementById("infoDelta");
-  const infoCvd   = document.getElementById("infoCvd");
-  const candleTimerEl = document.getElementById("candleTimer");
+let currentTfSec = 60;
 
-  const TF_MAP = {
-    "5s":  { priceInt: "1m",  tfSec: 5 },
-    "15s": { priceInt: "1m",  tfSec: 15 },
-    "30s": { priceInt: "1m",  tfSec: 30 },
-    "1m":  { priceInt: "1m",  tfSec: 60 },
-    "5m":  { priceInt: "5m",  tfSec: 300 },
-    "15m": { priceInt: "15m", tfSec: 900 },
-    "30m": { priceInt: "30m", tfSec: 1800 },
-    "1h":  { priceInt: "1h",  tfSec: 3600 },
-    "4h":  { priceInt: "4h",  tfSec: 14400 },
-    "1d":  { priceInt: "1d",  tfSec: 86400 },
-  };
-
-  let chart;
-  let candleSeries;
-
-  let candles = [];
-  let flowsRaw = [];
-  let flowsAgg = [];
-
-  let candleByTime = {};
-  let flowByTime   = {};
-  let cvdByTime    = {};
-
-  let refreshTimer = null;
-  let timerInterval = null;
-  let currentTfSec = 60;
-
-  let ALL_SIGNALS = []; /// сюда запишем ВСЕ сигналы (STR/MED/WK/SPK)
-
-  // -----------------------------------------------------------------------------
-
-  function createChart() {
-    const container = document.getElementById("chart");
-
-    chart = LightweightCharts.createChart(container, {
-      layout: {
-        background: { color: "#0b0b0b" },
-        textColor: "#cccccc",
-      },
-      grid: {
-        vertLines: { color: "#202020" },
-        horzLines: { color: "#202020" },
-      },
-      rightPriceScale: {
-        borderVisible: false,
-      },
-      timeScale: {
-        borderVisible: false,
-        rightOffset: 50,
-        barSpacing: 7,
-        secondsVisible: true,
-        timeVisible: true,
-      },
-      handleScroll: {
-        mouseWheel: true,
-        pressedMouseMove: true,    // свободное перемещение графика (ТВ стиль)
-      },
-      handleScale: {
-        mouseWheel: true,
-        pinch: true,
-        axisPressedMouseMove: {
-          time: true,
-          price: true,            // разрешаем вертикальный зум
-        },
-      },
-      crosshair: {
-        mode: LightweightCharts.CrosshairMode.Normal,
-      },
-    });
+// ------------------------
+// CHART INIT
+// ------------------------
+function initChart() {
+    chart = LightweightCharts.createChart(
+        document.getElementById("chart"),
+        {
+            layout:{ background:{color:"#050505"}, textColor:"#ccc" },
+            grid:{ vertLines:{color:"#111"}, horzLines:{color:"#111"} },
+            timeScale:{ borderVisible:false, timeVisible:true, secondsVisible:true },
+            rightPriceScale:{ borderVisible:false },
+        }
+    );
 
     candleSeries = chart.addCandlestickSeries({
-      upColor: "#26a69a",
-      downColor: "#ef5350",
-      wickUpColor: "#26a69a",
-      wickDownColor: "#ef5350",
-      borderVisible: false,
+        upColor:"#26a69a",
+        downColor:"#ef5350",
+        wickUpColor:"#26a69a",
+        wickDownColor:"#ef5350",
+        borderVisible:false
     });
+}
 
-    // Crosshair info
-    chart.subscribeCrosshairMove(param => {
-      if (!param || !param.time) {
-        infoTime.textContent  = "—";
-        infoDelta.textContent = "Δ: —";
-        infoCvd.textContent   = "CVD: —";
-        return;
-      }
-
-      const t = param.time;
-      const c = candleByTime[t];
-      const f = flowByTime[t];
-
-      if (c) {
-        const dt = new Date(t * 1000);
-        const yyyy = dt.getFullYear();
-        const MM = String(dt.getMonth() + 1).padStart(2, "0");
-        const dd = String(dt.getDate()).padStart(2, "0");
-        const hh = String(dt.getHours()).padStart(2, "0");
-        const mm = String(dt.getMinutes()).padStart(2, "0");
-        const ss = String(dt.getSeconds()).padStart(2, "0");
-        infoTime.textContent = `${yyyy}-${MM}-${dd} ${hh}:${mm}:${ss}`;
-      } else {
-        infoTime.textContent = "—";
-      }
-
-      if (f) {
-        infoDelta.textContent = "Δ: " + (Number(f.delta) || 0).toFixed(0);
-        infoCvd.textContent   = "CVD: " + (Number(f.cvd)   || 0).toFixed(0);
-      } else {
-        infoDelta.textContent = "Δ: —";
-        infoCvd.textContent   = "CVD: —";
-      }
-    });
-  }
-
-  // -----------------------------------------------------------------------------
-
-  async function loadPrice(symbol, uiTf) {
-    const cfg = TF_MAP[uiTf] || TF_MAP["1m"];
-    const interval = cfg.priceInt;
-
-    const resp = await fetch(`${API}/api/price/history?symbol=${symbol}&interval=${interval}`);
-    const j = await resp.json();
-    let arr = Array.isArray(j) ? j : [];
-
-    if (arr.length > 2000) arr = arr.slice(-2000);
-
-    candles = arr.map(c => ({
-      time:  c.time,
-      open:  c.open,
-      high:  c.high,
-      low:   c.low,
-      close: c.close,
+// ------------------------
+// LOAD PRICE
+// ------------------------
+async function loadPrice(symbol, tf) {
+    const cfg = TF_MAP[tf];
+    const r = await fetch(`${API}/api/price/history?symbol=${symbol}&interval=${cfg.interval}`);
+    const j = await r.json();
+    candles = j.map(c => ({
+        time:c.time,
+        open:c.open,
+        high:c.high,
+        low:c.low,
+        close:c.close
     }));
-  }
+}
 
-  async function loadDelta(symbol) {
-    const resp = await fetch(`${API}/api/delta?symbol=${symbol}`);
-    const j = await resp.json();
-    flowsRaw = Array.isArray(j) ? j : [];
-  }
+// ------------------------
+// LOAD DELTA
+// ------------------------
+async function loadDelta(symbol, sec) {
+    const r = await fetch(`${API}/api/delta/history?symbol=${symbol}&tf=${sec}`);
+    const j = await r.json();
+    flows = j;
+}
 
-  function aggregateDelta(tfSec) {
-    if (!flowsRaw.length) return [];
-    const step = tfSec || 60;
-
-    const buckets = new Map();
-
-    for (const x of flowsRaw) {
-      const ts = Number(x.ts);
-      const d  = Number(x.delta) || 0;
-      const bucket = Math.floor(ts / step) * step;
-
-      let b = buckets.get(bucket);
-      if (!b) {
-        b = { time: bucket, delta: 0 };
-        buckets.set(bucket, b);
-      }
-      b.delta += d;
+// aggregate
+function aggregateDelta(sec) {
+    const map = new Map();
+    for (const f of flows) {
+        const ts = Math.floor(f.ts / sec) * sec;
+        if (!map.has(ts)) map.set(ts, 0);
+        map.set(ts, map.get(ts) + f.delta);
     }
-
-    const arr = Array.from(buckets.values()).sort((a,b)=>a.time - b.time);
+    const arr = [...map.entries()].map(([time, delta]) => ({time, delta}));
+    arr.sort((a,b)=>a.time-b.time);
     let cvd = 0;
-    for (const x of arr) {
-      cvd += x.delta;
-      x.cvd = cvd;
-    }
-
+    for (const x of arr) { cvd += x.delta; x.cvd = cvd; }
     return arr;
-  }
+}
 
-  function rebuildMaps() {
-    candleByTime = {};
-    for (const c of candles) {
-      candleByTime[c.time] = c;
+// ------------------------
+// DETECT ABSORPTION SIGNALS
+// ------------------------
+function detectSignals() {
+    const out = [];
+    const byTime = {};
+    flowsAgg.forEach(f => { byTime[f.time] = f; });
+
+    for (let i=2;i<candles.length;i++) {
+        const c = candles[i];
+        const f = byTime[c.time];
+        if (!f) continue;
+
+        const delta = f.delta;
+
+        const body = Math.abs(c.close - c.open) || 1e-8;
+        const uw = c.high - Math.max(c.open,c.close);
+        const lw = Math.min(c.open,c.close) - c.low;
+
+        const longLower = lw > body * 1.3;
+        const longUpper = uw > body * 1.3;
+
+        const p1 = candles[i-1];
+        const p2 = candles[i-2];
+        const prevCluster = (byTime[p1.time]?.delta||0) + (byTime[p2.time]?.delta||0);
+
+        // Strong BUY
+        if (longLower && delta>0 && prevCluster<0 && c.low < p1.low) {
+            out.push({ time:c.time, position:"belowBar", color:"#00ff6a", shape:"circle", text:"B" });
+            continue;
+        }
+
+        // Strong SELL
+        if (longUpper && delta<0 && prevCluster>0 && c.high > p1.high) {
+            out.push({ time:c.time, position:"aboveBar", color:"#ff5252", shape:"circle", text:"S" });
+            continue;
+        }
+
+        // Weak BUY
+        if (longLower && delta>0) {
+            out.push({ time:c.time, position:"belowBar", color:"#ffd54f", shape:"circle", text:"•" });
+            continue;
+        }
+
+        // Weak SELL
+        if (longUpper && delta<0) {
+            out.push({ time:c.time, position:"aboveBar", color:"#ffd54f", shape:"circle", text:"•" });
+            continue;
+        }
     }
+    return out;
+}
 
-    flowByTime = {};
-    cvdByTime = {};
-    for (const f of flowsAgg) {
-      flowByTime[f.time] = f;
-      cvdByTime[f.time]  = f.cvd;
-    }
-  }
+// ------------------------
+// TIMER
+// ------------------------
+function updateTimer() {
+    if (!candles.length) return;
+    const last = candles[candles.length-1];
+    const close = last.time + currentTfSec;
+    const now = Math.floor(Date.now()/1000);
+    let left = close - now;
+    if (left<0) left=0;
+    const m = String(Math.floor(left/60)).padStart(2,'0');
+    const s = String(left%60).padStart(2,'0');
+    document.getElementById("candleTimer").textContent = `${m}:${s}`;
+}
 
-  // -----------------------------------------------------------------------------
+// ------------------------
+// FULL RELOAD
+// ------------------------
+async function reload(full=true) {
+    const symbol = document.getElementById("symbolSel").value;
+    const tf = document.getElementById("tfSel").value;
 
-  function setInitialView() {
-    const ts = candles.map(c => c.time);
-    if (!ts.length) return;
+    currentTfSec = TF_MAP[tf].sec;
+    document.getElementById("pairLabel").textContent =
+        `${symbol.toUpperCase()} — ${tf} — v1.13`;
 
-    const len = ts.length;
-    const N = 150;
-    const from = ts[Math.max(0, len - N)];
-    const to   = ts[len - 1];
-
-    chart.timeScale().setVisibleRange({ from, to });
-    chart.timeScale().applyOptions({ rightOffset: 50 });
-  }
-
-  function updateCandleTimer() {
-    if (!candles.length) {
-      candleTimerEl.textContent = "--:--";
-      return;
-    }
-    const last = candles[candles.length - 1];
-    const tf = currentTfSec || 60;
-
-    const openSec = last.time;
-    const closeSec = openSec + tf;
-    const nowSec = Math.floor(Date.now() / 1000);
-
-    let remain = closeSec - nowSec;
-    if (remain < 0) remain = 0;
-
-    const m = Math.floor(remain / 60);
-    const s = remain % 60;
-
-    candleTimerEl.textContent = `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-  }
-
-  function restartCandleTimer() {
-    if (timerInterval) clearInterval(timerInterval);
-    updateCandleTimer();
-    timerInterval = setInterval(updateCandleTimer, 200);
-  }
-
-  // -----------------------------------------------------------------------------
-
-  async function fullReload(hardReset) {
-    const symbol = symbolSel.value;
-    const uiTf   = tfSel.value;
-    const cfg    = TF_MAP[uiTf] || TF_MAP["1m"];
-    currentTfSec = cfg.tfSec;
-
-    pairLabel.textContent = symbol.toUpperCase() + " — " + uiTf;
-
-    let prevRange = null;
-    if (!hardReset && chart) {
-      try {
-        prevRange = chart.timeScale().getVisibleLogicalRange();
-      } catch(e) {}
-    }
-
-    await Promise.all([
-      loadPrice(symbol, uiTf),
-      loadDelta(symbol),
-    ]);
+    await loadPrice(symbol, tf);
+    await loadDelta(symbol, currentTfSec);
 
     flowsAgg = aggregateDelta(currentTfSec);
-    rebuildMaps();
 
     candleSeries.setData(candles);
+    candleSeries.setMarkers(detectSignals());
 
-    // сигналы будем ставить в Части 3
-    ALL_SIGNALS = detectAllSignals();
-    applySignalFilters();
-
-    if (prevRange && prevRange.from != null) {
-      chart.timeScale().setVisibleLogicalRange(prevRange);
-    } else {
-      setInitialView();
-    }
-
-    restartCandleTimer();
-  }
-
-  // -----------------------------------------------------------------------------
-
-  async function softRefresh() {
-    const symbol = symbolSel.value;
-    const uiTf   = tfSel.value;
-    const cfg    = TF_MAP[uiTf] || TF_MAP["1m"];
-    const interval = cfg.priceInt;
-    const tfSec = cfg.tfSec;
-
-    let prevLastTime = candles.length ? candles[candles.length - 1].time : null;
-
-    try {
-      const resp = await fetch(`${API}/api/price/history?symbol=${symbol}&interval=${interval}`);
-      const j = await resp.json();
-      let arr = Array.isArray(j) ? j : [];
-      if (arr.length > 300) arr = arr.slice(-300);
-
-      const newC = arr.map(c => ({
-        time: c.time,
-        open: c.open,
-        high: c.high,
-        low:  c.low,
-        close:c.close,
-      }));
-
-      if (!newC.length) return;
-
-      const lastNew = newC[newC.length - 1];
-
-      // обновление дельты
-      const dResp = await fetch(`${API}/api/delta?symbol=${symbol}`);
-      const dj = await dResp.json();
-      flowsRaw = Array.isArray(dj) ? dj : [];
-      flowsAgg = aggregateDelta(tfSec);
-      rebuildMaps();
-
-      if (!candles.length) {
-        candles = newC;
-        candleSeries.setData(candles);
-        ALL_SIGNALS = detectAllSignals();
-        applySignalFilters();
-        restartCandleTimer();
-        return;
-      }
-
-      const lastOld = candles[candles.length - 1];
-
-      if (lastNew.time === lastOld.time) {
-        candles[candles.length - 1] = lastNew;
-        candleSeries.update(lastNew);
-      } else if (lastNew.time > lastOld.time) {
-        candles.push(lastNew);
-        candleSeries.update(lastNew);
-      }
-
-      // обновляем сигналы только на последние свечи
-      ALL_SIGNALS = detectAllSignals();
-      applySignalFilters();
-
-      restartCandleTimer();
-    }
-    catch(e){
-      console.error("softRefresh error", e);
-    }
-  }
-
-  // -----------------------------------------------------------------------------
-
-  function startAutoRefresh() {
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(softRefresh, 1000); // 1 сек
-  }
-
-  // -----------------------------------------------------------------------------
-
-  createChart();
-  fullReload(true);
-  startAutoRefresh();
-
-  symbolSel.addEventListener("change", () => fullReload(true));
-  tfSel.addEventListener("change", () => fullReload(true));
-
-  fltSTR.addEventListener("change", applySignalFilters);
-  fltMED.addEventListener("change", applySignalFilters);
-  fltWK.addEventListener("change", applySignalFilters);
-  fltSPK.addEventListener("change", applySignalFilters);
-
-// ============================================================================
-//                   ***  ЧАСТЬ 3 — СИСТЕМА СИГНАЛОВ  ***
-// ============================================================================
-
-let markerSeries = null;
-
-function clearMarkers() {
-  if (markerSeries) {
-    markerSeries.setMarkers([]);
-  }
+    updateTimer();
 }
 
-function applySignalFilters() {
-  if (!ALL_SIGNALS || !ALL_SIGNALS.length) {
-    clearMarkers();
-    return;
-  }
+initChart();
+reload(true);
+setInterval(() => { reload(false); updateTimer(); }, 1200);
 
-  const out = [];
-
-  for (const s of ALL_SIGNALS) {
-    if (s.type === "STR" && !fltSTR.checked) continue;
-    if (s.type === "MED" && !fltMED.checked) continue;
-    if (s.type === "WK"  && !fltWK.checked)  continue;
-    if (s.type === "SPK" && !fltSPK.checked) continue;
-
-    // Добавляем только выбранные
-    out.push(s.marker);
-  }
-
-  if (markerSeries) {
-    markerSeries.setMarkers(out);
-  }
-}
-
-function detectAllSignals() {
-  const out = [];
-
-  if (!candles.length || !flowsAgg.length) return out;
-
-  for (let i = 1; i < candles.length; i++) {
-    const c = candles[i];
-    const f = flowByTime[c.time];
-
-    if (!f) continue; // нет дельты → нет сигнала
-
-    const open  = c.open;
-    const close = c.close;
-    const high  = c.high;
-    const low   = c.low;
-    const body  = Math.abs(close - open);
-    const range = high - low;
-    const wickTop  = high - Math.max(open, close);
-    const wickBot  = Math.min(open, close) - low;
-
-    const delta = f.delta;
-    const absDelta = Math.abs(delta);
-
-    // ------------------------------------------------------------------------
-    // 1) STRONG ABSORPTION (STR)
-    // ------------------------------------------------------------------------
-    if (range > 0) {
-      const wickRatioTop = wickTop / range;
-      const wickRatioBot = wickBot / range;
-
-      const smallBody = (body <= range * 0.25);
-      const bigDelta  = absDelta > 500;   // сильная дельта (можно подрегулировать)
-
-      if (smallBody && bigDelta) {
-        if (wickRatioBot > 0.55 && delta > 0) {
-          // сильное BUY absorption
-          out.push({
-            type: "STR",
-            marker: {
-              time: c.time,
-              position: "belowBar",
-              color: "#00e676",
-              shape: "circle",
-              size: 3,
-              text: ""
-            }
-          });
-        }
-        if (wickRatioTop > 0.55 && delta < 0) {
-          // сильное SELL absorption
-          out.push({
-            type: "STR",
-            marker: {
-              time: c.time,
-              position: "aboveBar",
-              color: "#ef5350",
-              shape: "circle",
-              size: 3,
-              text: ""
-            }
-          });
-        }
-      }
-    }
-
-    // ------------------------------------------------------------------------
-    // 2) MEDIUM ABSORPTION (MED)
-    // ------------------------------------------------------------------------
-    if (range > 0) {
-      const wickRatioTop = wickTop / range;
-      const wickRatioBot = wickBot / range;
-
-      const midBody = (body <= range * 0.45);
-      const midDelta = absDelta > 150;  // средний порог
-
-      if (midBody && midDelta) {
-        if (wickRatioBot > 0.35 && delta > 0) {
-          out.push({
-            type: "MED",
-            marker: {
-              time: c.time,
-              position: "belowBar",
-              color: "#ffd54f",
-              shape: "circle",
-              size: 2,
-            }
-          });
-        }
-        if (wickRatioTop > 0.35 && delta < 0) {
-          out.push({
-            type: "MED",
-            marker: {
-              time: c.time,
-              position: "aboveBar",
-              color: "#ffd54f",
-              shape: "circle",
-              size: 2,
-            }
-          });
-        }
-      }
-    }
-
-    // ------------------------------------------------------------------------
-    // 3) WEAK ABSORPTION / REJECTION (WK)
-    // ------------------------------------------------------------------------
-    if (range > 0) {
-      const wickRatioTop = wickTop / range;
-      const wickRatioBot = wickBot / range;
-
-      if (wickRatioBot > 0.25 && delta > 0) {
-        out.push({
-          type: "WK",
-          marker: {
-            time: c.time,
-            position: "belowBar",
-            color: "#ffd54f",
-            shape: "circle",
-            size: 1,
-          }
-        });
-      }
-
-      if (wickRatioTop > 0.25 && delta < 0) {
-        out.push({
-          type: "WK",
-          marker: {
-            time: c.time,
-            position: "aboveBar",
-            color: "#ffd54f",
-            shape: "circle",
-            size: 1,
-          }
-        });
-      }
-    }
-
-    // ------------------------------------------------------------------------
-    // 4) DELTA SPIKE (SPK)
-    // ------------------------------------------------------------------------
-    if (absDelta > 800) {
-      out.push({
-        type: "SPK",
-        marker: {
-          time: c.time,
-          position: "right",
-          color: "#40a0ff",
-          shape: "circle",
-          size: 2,
-        }
-      });
-    }
-  }
-
-  return out;
-}
-
-// -----------------------------------------------------------------------------
-
-// Создаём отдельную серию маркеров
-markerSeries = candleSeries;
-
-// -----------------------------------------------------------------------------
+document.getElementById("reloadBtn").onclick = () => reload(true);
+document.getElementById("symbolSel").onchange = () => reload(true);
+document.getElementById("tfSel").onchange = () => reload(true);
 </script>
-</div>
 </body>
 </html>
-
