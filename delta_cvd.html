@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>crypto-orderflow — DIFF + Price</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    html, body {
+      margin:0; padding:0;
+      height:100%; width:100%;
+      background:#050505;
+      color:#ddd;
+      font-family:system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow:hidden;
+    }
+    #app {
+      display:flex;
+      flex-direction:column;
+      height:100vh;
+    }
+    #controls {
+      flex:0 0 auto;
+      padding:6px 10px;
+      background:#080808;
+      border-bottom:1px solid #151515;
+      display:flex;
+      align-items:center;
+      gap:12px;
+      font-size:13px;
+    }
+    #controls label {
+      display:flex;
+      align-items:center;
+      gap:4px;
+    }
+    #controls select, #controls button {
+      background:#000;
+      color:#ddd;
+      border:1px solid #333;
+      border-radius:4px;
+      padding:3px 6px;
+      font-size:12px;
+    }
+    #controls button {
+      background:#2e7d32;
+      cursor:pointer;
+    }
+    #controls button:hover {
+      background:#3fa546;
+    }
+
+    #chartsWrapper {
+      flex:1;
+      display:flex;
+      flex-direction:column;
+    }
+
+    #chartTop {
+      flex:3;
+      position:relative;
+    }
+    #chartMain {
+      width:100%;
+      height:100%;
+    }
+
+    #chartBottom {
+      flex:1;
+      border-top:1px solid #151515;
+    }
+    #chartDiff {
+      width:100%;
+      height:100%;
+    }
+
+    #pairLabel {
+      position:absolute;
+      top:8px; left:10px;
+      background:rgba(0,0,0,0.4);
+      padding:4px 8px;
+      border-radius:6px;
+      font-size:13px;
+      z-index:20;
+    }
+    #legend {
+      position:absolute;
+      top:8px; right:10px;
+      background:rgba(0,0,0,0.4);
+      padding:4px 8px;
+      border-radius:6px;
+      font-size:11px;
+      z-index:20;
+    }
+    #legend .dot {
+      width:7px; height:7px;
+      display:inline-block;
+      border-radius:50%;
+      margin-right:4px;
+    }
+    #candleTimer {
+      position:absolute;
+      right:12px; top:40px;
+      background:rgba(0,0,0,0.6);
+      padding:3px 6px;
+      border-radius:6px;
+      font-size:11px;
+      z-index:20;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <div id="controls">
+    <label>Монета:
+      <select id="symbolSel">
+        <option value="btcusdt">BTCUSDT</option>
+        <option value="ethusdt">ETHUSDT</option>
+        <option value="solusdt">SOLUSDT</option>
+        <option value="xrpusdt">XRPUSDT</option>
+        <option value="zenusdt">ZENUSDT</option>
+        <option value="zecusdt">ZECUSDT</option>
+        <option value="mntusdt">MNTUSDT</option>
+        <option value="dogeusdt">DOGEUSDT</option>
+        <option value="pnutusdt">PNUTUSDT</option>
+        <option value="filusdt">FILUSDT</option>
+        <option value="strkusdt">STRKUSDT</option>
+        <option value="arcusdt">ARCUSDT</option>
+        <option value="glmusdt">GLMUSDT</option>
+        <option value="bardusdt">BARDUSDT</option>
+        <option value="minausdt">MINAUSDT</option>
+        <option value="acxusdt">ACXUSDT</option>
+        <option value="wlfiusdt">WLFIUSDT</option>
+        <option value="tacusdt">TACUSDT</option>
+        <option value="xlmusdt">XLMUSDT</option>
+        <option value="adausdt">ADAUSDT</option>
+        <option value="suiusdt">SUIUSDT</option>
+        <option value="tonusdt">TONUSDT</option>
+        <option value="linkusdt">LINKUSDT</option>
+        <option value="ltcusdt">LTCUSDT</option>
+        <option value="injusdt">INJUSDT</option>
+        <option value="ethfiusdt">ETHFIUSDT</option>
+      </select>
+    </label>
+
+    <label>TF:
+      <select id="tfSel">
+        <option value="1m">1m</option>
+        <option value="5m" selected>5m</option>
+        <option value="15m">15m</option>
+        <option value="1h">1h</option>
+      </select>
+    </label>
+
+    <button id="reloadBtn">Обновить</button>
+  </div>
+
+  <div id="chartsWrapper">
+
+    <div id="chartTop">
+      <div id="pairLabel">BTCUSDT — 5m</div>
+      <div id="legend">
+        <div><span class="dot" style="background:#00e676"></span>bullish_bottom</div>
+        <div><span class="dot" style="background:#ff5252"></span>bearish_top</div>
+      </div>
+      <div id="candleTimer">--:--</div>
+      <div id="chartMain"></div>
+    </div>
+
+    <div id="chartBottom">
+      <div id="chartDiff"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API = "http://217.154.190.220:8088";
+
+const TF_MAP = {
+  "1m":  { interval: "1m",  tfSec: 60   },
+  "5m":  { interval: "5m",  tfSec: 300  },
+  "15m": { interval: "15m", tfSec: 900  },
+  "1h":  { interval: "1h",  tfSec: 3600 },
+};
+
+let chartMain, chartDiff;
+let candleSeries;
+let diff15Series, diff30Series;
+
+let candles = [];
+let deltaBars = [];
+let currentTfKey = "5m";
+
+let syncGuard = false;
+
+// -------------------- INIT CHARTS --------------------
+function initCharts() {
+  const mainContainer = document.getElementById("chartMain");
+  const diffContainer = document.getElementById("chartDiff");
+
+  chartMain = LightweightCharts.createChart(mainContainer, {
+    layout: { background: { color: "#050505" }, textColor: "#ccc" },
+    grid: {
+      vertLines: { color: "#111" },
+      horzLines: { color: "#111" },
+    },
+    timeScale: {
+      borderVisible: false,
+      timeVisible: true,
+      secondsVisible: false,
+    },
+    rightPriceScale: { borderVisible: false },
+  });
+
+  candleSeries = chartMain.addCandlestickSeries({
+    upColor: "#26a69a",
+    downColor: "#ef5350",
+    wickUpColor: "#26a69a",
+    wickDownColor: "#ef5350",
+    borderVisible: false,
+  });
+
+  chartDiff = LightweightCharts.createChart(diffContainer, {
+    layout: { background: { color: "#050505" }, textColor: "#ccc" },
+    grid: {
+      vertLines: { color: "#111" },
+      horzLines: { color: "#111" },
+    },
+    timeScale: {
+      borderVisible: false,
+      timeVisible: true,
+      secondsVisible: false,
+    },
+    rightPriceScale: { borderVisible: false },
+  });
+
+  diff15Series = chartDiff.addLineSeries({
+    color: "#00ff6a",
+    lineWidth: 2,
+  });
+  diff30Series = chartDiff.addLineSeries({
+    color: "#2979ff",
+    lineWidth: 2,
+  });
+
+  function syncRange(from, to) {
+    if (syncGuard) return;
+    const range = from.timeScale().getVisibleRange();
+    if (!range) return;
+    syncGuard = true;
+    try {
+      to.timeScale().setVisibleRange(range);
+    } catch (e) {
+      // ignore
+    }
+    syncGuard = false;
+  }
+
+  chartMain.timeScale().subscribeVisibleTimeRangeChange(() => {
+    syncRange(chartMain, chartDiff);
+  });
+
+  chartDiff.timeScale().subscribeVisibleTimeRangeChange(() => {
+    syncRange(chartDiff, chartMain);
+  });
+}
+
+// -------------------- LOAD PRICE --------------------
+async function loadPrice(symbol, tfKey) {
+  const cfg = TF_MAP[tfKey];
+  const res = await fetch(`${API}/api/price/history?symbol=${symbol}&interval=${cfg.interval}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) {
+    candles = [];
+    return;
+  }
+  candles = data.map(c => ({
+    time: c.time,
+    open: c.open,
+    high: c.high,
+    low:  c.low,
+    close:c.close,
+  }));
+}
+
+// -------------------- LOAD DELTA --------------------
+async function loadDelta(symbol, tfKey) {
+  const tfSec = TF_MAP[tfKey].tfSec;
+  const res = await fetch(`${API}/api/delta/history?symbol=${symbol}&tf=${tfSec}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) {
+    deltaBars = [];
+    return;
+  }
+  deltaBars = data;
+}
+
+// -------------------- MARKERS ПО diff_signal --------------------
+function buildMarkers() {
+  const markers = [];
+  for (const bar of deltaBars) {
+    const t = bar.ts;
+    const sig = bar.diff_signal;
+    if (!sig) continue;
+
+    if (sig === "bullish_bottom" || sig === "bullish") {
+      markers.push({
+        time: t,
+        position: "belowBar",
+        color: "#00e676",
+        shape: "circle",
+        text: "B",
+      });
+    } else if (sig === "bearish_top" || sig === "bearish") {
+      markers.push({
+        time: t,
+        position: "aboveBar",
+        color: "#ff5252",
+        shape: "circle",
+        text: "S",
+      });
+    }
+  }
+  return markers;
+}
+
+// -------------------- TIMER --------------------
+function updateTimer() {
+  if (!candles.length) return;
+  const last = candles[candles.length-1];
+  const tfSec = TF_MAP[currentTfKey].tfSec;
+  const closeTs = last.time + tfSec;
+  const now = Math.floor(Date.now()/1000);
+  let left = closeTs - now;
+  if (left < 0) left = 0;
+  const m = String(Math.floor(left/60)).padStart(2,"0");
+  const s = String(left%60).padStart(2,"0");
+  document.getElementById("candleTimer").textContent = `${m}:${s}`;
+}
+
+// -------------------- FULL RELOAD --------------------
+async function reload(full = true) {
+  const symbolEl = document.getElementById("symbolSel");
+  const tfEl     = document.getElementById("tfSel");
+
+  const symbol = symbolEl.value;
+  const tfKey  = tfEl.value;
+  currentTfKey = tfKey;
+
+  document.getElementById("pairLabel").textContent =
+    symbol.toUpperCase() + " — " + tfKey;
+
+  await loadPrice(symbol, tfKey);
+  await loadDelta(symbol, tfKey);
+
+  candleSeries.setData(candles);
+
+  const diff15 = deltaBars.map(b => ({
+    time: b.ts,
+    value: b.diff15 ?? 0,
+  }));
+  const diff30 = deltaBars.map(b => ({
+    time: b.ts,
+    value: b.diff30 ?? 0,
+  }));
+  diff15Series.setData(diff15);
+  diff30Series.setData(diff30);
+
+  candleSeries.setMarkers(buildMarkers());
+  updateTimer();
+}
+
+// -------------------- INIT --------------------
+initCharts();
+reload(true);
+setInterval(() => {
+  reload(false);
+  updateTimer();
+}, 1200);
+
+// UI handlers
+document.getElementById("reloadBtn").onclick  = () => reload(true);
+document.getElementById("symbolSel").onchange = () => reload(true);
+document.getElementById("tfSel").onchange     = () => reload(true);
+</script>
+</body>
+</html>

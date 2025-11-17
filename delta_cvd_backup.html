@@ -1,0 +1,449 @@
+<!-- delta_cvd v1.13 -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>crypto-orderflow — v1.13</title>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+    html, body {
+        margin:0; padding:0;
+        background:#050505;
+        height:100%;
+        color:#ddd;
+        font-family:system-ui;
+        overflow:hidden;
+    }
+    #app {
+        display:flex;
+        flex-direction:column;
+        height:100vh;
+    }
+    #controls {
+        flex:0 0 auto;
+        padding:6px 10px;
+        background:#080808;
+        border-bottom:1px solid #151515;
+        display:flex;
+        gap:10px;
+        font-size:13px;
+    }
+    #controls select, #controls button {
+        background:#000;
+        color:#ddd;
+        border:1px solid #333;
+        border-radius:4px;
+        padding:3px 6px;
+        font-size:12px;
+    }
+    #controls button {
+        background:#2e7d32;
+        cursor:pointer;
+    }
+    #controls button:hover {
+        background:#3fa546;
+    }
+    #chartContainer { position:relative; flex:1; }
+    #chart { width:100%; height:100%; }
+
+    #pairLabel {
+        position:absolute; top:8px; left:10px;
+        background:rgba(0,0,0,0.4);
+        padding:4px 8px;
+        border-radius:6px;
+        font-size:13px;
+        z-index:20;
+    }
+    #legend {
+        position:absolute; top:8px; right:10px;
+        background:rgba(0,0,0,0.4);
+        padding:4px 8px;
+        border-radius:6px;
+        font-size:11px;
+        z-index:20;
+    }
+    #legend .dot {
+        width:7px; height:7px;
+        display:inline-block;
+        border-radius:50%;
+        margin-right:4px;
+    }
+    #candleTimer {
+        position:absolute; right:12px; top:40px;
+        background:rgba(0,0,0,0.6);
+        padding:3px 6px;
+        border-radius:6px;
+        font-size:11px;
+        z-index:20;
+    }
+</style>
+</head>
+
+<body>
+<div id="app">
+
+    <div id="controls">
+        <label>Монета:
+            <select id="symbolSel">
+                <option value="btcusdt">BTCUSDT</option>
+                <option value="ethusdt">ETHUSDT</option>
+                <option value="bnbusdt">BNBUSDT</option>
+                <option value="suiusdt">SUIUSDT</option>
+                <option value="adausdt">ADAUSDT</option>
+                <option value="filusdt">FILUSDT</option>
+                <option value="injusdt">INJUSDT</option>
+            </select>
+        </label>
+
+        <label>TF:
+            <select id="tfSel">
+                <option value="1m" selected>1m</option>
+                <option value="5m">5m</option>
+                <option value="15m">15m</option>
+                <option value="1h">1h</option>
+            </select>
+        </label>
+
+        <button id="reloadBtn">Обновить</button>
+    </div>
+
+    <div id="chartContainer">
+        <div id="pairLabel">BTCUSDT — 1m — v1.13</div>
+
+        <div id="legend">
+            <div><span class="dot" style="background:#00e676"></span>B — strong BUY</div>
+            <div><span class="dot" style="background:#ff5252"></span>S — strong SELL</div>
+            <div><span class="dot" style="background:#ffd54f"></span>• — weak absorption</div>
+        </div>
+
+        <div id="candleTimer">--:--</div>
+        <div id="chart"></div>
+        <div id="diffPanel" style="height: 150px; width: 100%;"></div>
+        <!-- DIFF-панель -->
+<div id="diffPanel" style="height: 180px; width: 100%; margin-top: 10px;"></div>
+
+    </div>
+
+</div>
+
+<script>
+// ------------------------
+// CONFIG
+// ------------------------
+const API = "http://217.154.190.220:8088";
+
+const TF_MAP = {
+    "1m": { interval:"1m", sec:60 },
+    "5m": { interval:"5m", sec:300 },
+    "15m": { interval:"15m", sec:900 },
+    "1h": { interval:"1h", sec:3600 }
+};
+
+let chart, candleSeries;
+let candles = [];
+let flows = [];
+let flowsAgg = [];
+
+let currentTfSec = 60;
+
+// ------------------------
+// CHART INIT
+// ------------------------
+function initChart() {
+    chart = LightweightCharts.createChart(
+        document.getElementById("chart"),
+        {
+            layout:{ background:{color:"#050505"}, textColor:"#ccc" },
+            grid:{ vertLines:{color:"#111"}, horzLines:{color:"#111"} },
+            timeScale:{ borderVisible:false, timeVisible:true, secondsVisible:true },
+        // ------------------------
+
+        // DIFF-график снизу
+
+        // ------------------------
+
+        const diffContainer = document.getElementById("diffPanel");
+
+        diffChart = LightweightCharts.createChart(diffContainer, {
+
+            layout: { background: { color: "#050505" }, textColor: "#ccc" },
+
+            grid: { vertLines: { color: "#111" }, horzLines: { color: "#111" } },
+
+            timeScale: { borderVisible: false, timeVisible: true, rightOffset: 50 },
+
+            rightPriceScale: { borderVisible: false }
+
+        });
+
+        diff15Series = diffChart.addLineSeries({ color: "#00ff6a", lineWidth: 2 });
+
+        diff30Series = diffChart.addLineSeries({ color: "#2979ff", lineWidth: 2 });
+
+        // синхронизация
+
+        chart.timeScale().subscribeVisibleTimeRangeChange(range => {
+
+            diffChart.timeScale().setVisibleRange(range);
+
+        });
+
+        chart.subscribeCrosshairMove(param => {
+
+            diffChart.setCrosshairPosition(param);
+
+        });
+
+        diffChart.subscribeCrosshairMove(param => {
+
+            chart.setCrosshairPosition(param);
+
+        });
+            rightPriceScale:{ borderVisible:false },
+        // ------------------------
+
+        // DIFF-график снизу
+
+        // ------------------------
+
+        const diffContainer = document.getElementById("diffPanel");
+
+        diffChart = LightweightCharts.createChart(diffContainer, {
+
+            layout: { background: { color: "#050505" }, textColor: "#ccc" },
+
+            grid: { vertLines: { color: "#111" }, horzLines: { color: "#111" } },
+
+            timeScale: { borderVisible: false, timeVisible: true, rightOffset: 50 },
+
+            rightPriceScale: { borderVisible: false }
+
+        });
+
+        diff15Series = diffChart.addLineSeries({ color: "#00ff6a", lineWidth: 2 });
+
+        diff30Series = diffChart.addLineSeries({ color: "#2979ff", lineWidth: 2 });
+
+        // синхронизация
+
+        chart.timeScale().subscribeVisibleTimeRangeChange(range => {
+
+            diffChart.timeScale().setVisibleRange(range);
+
+        });
+
+        chart.subscribeCrosshairMove(param => {
+
+            diffChart.setCrosshairPosition(param);
+
+        });
+
+        diffChart.subscribeCrosshairMove(param => {
+
+            chart.setCrosshairPosition(param);
+
+        });
+        }
+    );
+
+    candleSeries = chart.addCandlestickSeries({
+        upColor:"#26a69a",
+        downColor:"#ef5350",
+        wickUpColor:"#26a69a",
+        wickDownColor:"#ef5350",
+        borderVisible:false
+        // ------------------------
+
+        // DIFF-график снизу
+
+        // ------------------------
+
+        const diffContainer = document.getElementById("diffPanel");
+
+        diffChart = LightweightCharts.createChart(diffContainer, {
+
+            layout: { background: { color: "#050505" }, textColor: "#ccc" },
+
+            grid: { vertLines: { color: "#111" }, horzLines: { color: "#111" } },
+
+            timeScale: { borderVisible: false, timeVisible: true, rightOffset: 50 },
+
+            rightPriceScale: { borderVisible: false }
+
+        });
+
+        diff15Series = diffChart.addLineSeries({ color: "#00ff6a", lineWidth: 2 });
+
+        diff30Series = diffChart.addLineSeries({ color: "#2979ff", lineWidth: 2 });
+
+        // синхронизация
+
+        chart.timeScale().subscribeVisibleTimeRangeChange(range => {
+
+            diffChart.timeScale().setVisibleRange(range);
+
+        });
+
+        chart.subscribeCrosshairMove(param => {
+
+            diffChart.setCrosshairPosition(param);
+
+        });
+
+        diffChart.subscribeCrosshairMove(param => {
+
+            chart.setCrosshairPosition(param);
+
+        });
+    });
+}
+
+// ------------------------
+// LOAD PRICE
+// ------------------------
+async function loadPrice(symbol, tf) {
+    const cfg = TF_MAP[tf];
+    const r = await fetch(`${API}/api/price/history?symbol=${symbol}&interval=${cfg.interval}`);
+    const j = await r.json();
+    candles = j.map(c => ({
+        time:c.time,
+        open:c.open,
+        high:c.high,
+        low:c.low,
+        close:c.close
+    }));
+}
+
+// ------------------------
+// LOAD DELTA
+// ------------------------
+async function loadDelta(symbol, sec) {
+    const r = await fetch(`${API}/api/delta/history?symbol=${symbol}&tf=${sec}`);
+    const j = await r.json();
+    flows = j;
+}
+
+// aggregate
+function aggregateDelta(sec) {
+    const map = new Map();
+    for (const f of flows) {
+        const ts = Math.floor(f.ts / sec) * sec;
+        if (!map.has(ts)) map.set(ts, 0);
+        map.set(ts, map.get(ts) + f.delta);
+    }
+    const arr = [...map.entries()].map(([time, delta]) => ({time, delta}));
+    arr.sort((a,b)=>a.time-b.time);
+    let cvd = 0;
+    for (const x of arr) { cvd += x.delta; x.cvd = cvd; }
+    return arr;
+}
+
+// ------------------------
+// DETECT ABSORPTION SIGNALS
+// ------------------------
+function detectSignals() {
+    const out = [];
+    const byTime = {};
+    flowsAgg.forEach(f => { byTime[f.time] = f; });
+
+    for (let i=2;i<candles.length;i++) {
+        const c = candles[i];
+        const f = byTime[c.time];
+        if (!f) continue;
+
+        const delta = f.delta;
+
+        const body = Math.abs(c.close - c.open) || 1e-8;
+        const uw = c.high - Math.max(c.open,c.close);
+        const lw = Math.min(c.open,c.close) - c.low;
+
+        const longLower = lw > body * 1.3;
+        const longUpper = uw > body * 1.3;
+
+        const p1 = candles[i-1];
+        const p2 = candles[i-2];
+        const prevCluster = (byTime[p1.time]?.delta||0) + (byTime[p2.time]?.delta||0);
+
+        // Strong BUY
+        if (longLower && delta>0 && prevCluster<0 && c.low < p1.low) {
+            out.push({ time:c.time, position:"belowBar", color:"#00ff6a", shape:"circle", text:"B" });
+            continue;
+        }
+
+        // Strong SELL
+        if (longUpper && delta<0 && prevCluster>0 && c.high > p1.high) {
+            out.push({ time:c.time, position:"aboveBar", color:"#ff5252", shape:"circle", text:"S" });
+            continue;
+        }
+
+        // Weak BUY
+        if (longLower && delta>0) {
+            out.push({ time:c.time, position:"belowBar", color:"#ffd54f", shape:"circle", text:"•" });
+            continue;
+        }
+
+        // Weak SELL
+        if (longUpper && delta<0) {
+            out.push({ time:c.time, position:"aboveBar", color:"#ffd54f", shape:"circle", text:"•" });
+            continue;
+        }
+    }
+    return out;
+}
+
+// ------------------------
+// TIMER
+// ------------------------
+function updateTimer() {
+    if (!candles.length) return;
+    const last = candles[candles.length-1];
+    const close = last.time + currentTfSec;
+    const now = Math.floor(Date.now()/1000);
+    let left = close - now;
+    if (left<0) left=0;
+    const m = String(Math.floor(left/60)).padStart(2,'0');
+    const s = String(left%60).padStart(2,'0');
+    document.getElementById("candleTimer").textContent = `${m}:${s}`;
+}
+
+// ------------------------
+// FULL RELOAD
+// ------------------------
+async function reload(full=true) {
+    const symbol = document.getElementById("symbolSel").value;
+    const tf = document.getElementById("tfSel").value;
+
+    currentTfSec = TF_MAP[tf].sec;
+    document.getElementById("pairLabel").textContent =
+        `${symbol.toUpperCase()} — ${tf} — v1.13`;
+
+    await loadPrice(symbol, tf);
+    await loadDelta(symbol, currentTfSec);
+
+    flowsAgg = aggregateDelta(currentTfSec);
+   const diffData15 = flowsAgg.map(f => ({ time: f.time, value: f.diff15 || 0 }));
+
+   const diffData30 = flowsAgg.map(f => ({ time: f.time, value: f.diff30 || 0 }));
+
+   diff15Series.setData(diffData15);
+
+   diff30Series.setData(diffData30);
+
+    candleSeries.setData(candles);
+    candleSeries.setMarkers(detectSignals());
+
+    updateTimer();
+}
+
+initChart();
+reload(true);
+setInterval(() => { reload(false); updateTimer(); }, 1200);
+
+document.getElementById("reloadBtn").onclick = () => reload(true);
+document.getElementById("symbolSel").onchange = () => reload(true);
+document.getElementById("tfSel").onchange = () => reload(true);
+</script>
+</body>
+</html>
